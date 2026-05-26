@@ -1,0 +1,26 @@
+# Build artifacts
+*.exe
+*.dll
+*.pdb
+*.obj
+nimcache/
+dist/
+
+# Nim
+src/nimble.paths
+*.nim.cfg.bak
+
+# OS / editor
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+.DS_Store
+
+# Local agent state (don't ever commit these)
+agent.conf
+agent.log
+agent.exe.new
+DiskInfo.txt
+lhm.log
