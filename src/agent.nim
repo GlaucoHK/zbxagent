@@ -129,49 +129,18 @@ proc sendDiskLld(server, hostname: string): bool =
   var kv: seq[(string, string)] = @[]
   kv.add(("rmm.disk.discovery", getDiskDiscoveryJson()))
 
-  # Backward-compat: agentes antigos enviavam essas chaves (sem [N])
-  # com os valores do disco de boot. Mantemos para que triggers
-  # legados e itens estáticos do template continuem recebendo dados.
-  if disks.len > 0:
-    let b = disks[0]
-    let bWear   = getDiskWearPctFor(b.smartDev)
-    var bHealth = getDiskHealthPctFor(b.smartDev)
-    var bReads  = getDiskReadsGBFor(b.smartDev)
-    var bWrites = getDiskWritesGBFor(b.smartDev)
-    # Fallback CDI: aplicar a TODOS os campos que smartctl/PS não conseguiram
-    # ler (drives atrás de Intel VMD/RST). Uma única chamada — o cache do
-    # cdi_client garante 1 spawn por hora no máximo.
-    if bHealth == 100 and bWear == 0 or bReads == 0.0 or bWrites == 0.0:
-      let cdi = getCdiDriveForIndex(b.deviceNum)
-      if bHealth == 100 and bWear == 0 and cdi.health >= 0: bHealth = cdi.health
-      if bReads  == 0.0 and cdi.readsGB  >= 0.0: bReads  = cdi.readsGB
-      if bWrites == 0.0 and cdi.writesGB >= 0.0: bWrites = cdi.writesGB
-    let bTemp   = getDiskTemperatureFor(b.smartDev)
-    let bSmart  = getSmartStatusFor(b.smartDev)
-    let bPoh    = getPowerOnHoursFor(b.smartDev)
-    let bHealthTxt =
-      case bSmart
-      of 0: "Healthy"
-      of 1: "Failed"
-      else: "Unknown"
-    kv.add(("hdd.poweron_hours",  $bPoh))
-    kv.add(("hdd.smart_status",   $bSmart))
-    kv.add(("rmm.disk.health",    bHealthTxt))
-    kv.add(("rmm.disk.health_pct", $bHealth))
-    kv.add(("rmm.disk.temp",      formatFloat(bTemp, ffDecimal, 2)))
-    kv.add(("rmm.disk.reads_gb",  formatFloat(bReads,  ffDecimal, 2)))
-    kv.add(("rmm.disk.writes_gb", formatFloat(bWrites, ffDecimal, 2)))
-    kv.add(("rmm.disk.reads",     $int64(bReads  * 1_073_741_824.0)))  # bytes
-    kv.add(("rmm.disk.writes",    $int64(bWrites * 1_073_741_824.0)))
-    kv.add(("rmm.disk.wear_pct",  $bWear))
-
+  # Um conjunto de métricas por disco descoberto via LLD. Sem mais
+  # itens não-indexados duplicados (rmm.disk.reads, hdd.smart_status,
+  # etc.) — o template os desabilitou em cleanup_duplicates.py.
+  # Sem mais variantes _gb redundantes — rmm.disk.reads[N] em bytes
+  # auto-escala (MB/GB/TB) no Zabbix.
   for d in disks:
     let id = $d.deviceNum
     let wear   = getDiskWearPctFor(d.smartDev)
     var health = getDiskHealthPctFor(d.smartDev)
     var reads  = getDiskReadsGBFor(d.smartDev)
     var writes = getDiskWritesGBFor(d.smartDev)
-    # Fallback CDI: cobre health + reads + writes em um único spawn (cache 30min)
+    # Fallback CDI: cobre health + reads + writes num único spawn (cache 30min)
     if (health == 100 and wear == 0) or reads == 0.0 or writes == 0.0:
       let cdi = getCdiDriveForIndex(d.deviceNum)
       if health == 100 and wear == 0 and cdi.health >= 0: health = cdi.health
@@ -185,8 +154,6 @@ proc sendDiskLld(server, hostname: string): bool =
     kv.add(("rmm.disk.serial"          & suf, d.serial))
     kv.add(("rmm.disk.wear_pct"        & suf, $wear))
     kv.add(("rmm.disk.health_pct"      & suf, $health))
-    kv.add(("rmm.disk.reads_gb"        & suf, formatFloat(reads,  ffDecimal, 2)))
-    kv.add(("rmm.disk.writes_gb"       & suf, formatFloat(writes, ffDecimal, 2)))
     kv.add(("rmm.disk.reads"           & suf, $int64(reads  * 1_073_741_824.0)))
     kv.add(("rmm.disk.writes"          & suf, $int64(writes * 1_073_741_824.0)))
     kv.add(("rmm.disk.temp"            & suf, formatFloat(temp,   ffDecimal, 2)))
