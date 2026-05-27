@@ -27,10 +27,13 @@ proc psQuote(s: string): string =
   s.replace("'", "''")
 
 proc httpGet(url: string): string =
-  ## Retorna corpo da resposta, ou string vazia em erro.
+  ## Retorna corpo da resposta como UTF-8 string, ou vazio em erro.
+  ## Decodifica explicitamente: -UseBasicParsing devolve .Content como
+  ## byte[], que via stdout vira "uma-linha-por-byte". O GetString fixa.
   let script = "[Net.ServicePointManager]::SecurityProtocol='Tls12'; " &
-               "try { (Invoke-WebRequest -Uri '" & psQuote(url) &
-               "' -UseBasicParsing -TimeoutSec 10).Content } " &
+               "try { [System.Text.Encoding]::UTF8.GetString( " &
+               "(Invoke-WebRequest -Uri '" & psQuote(url) &
+               "' -UseBasicParsing -TimeoutSec 10).Content) } " &
                "catch { '' }"
   let res = execCmdEx("powershell -NoProfile -Command \"" & script & "\"")
   if res.exitCode == 0: return res.output
@@ -80,10 +83,39 @@ proc versionGreater(a, b: string): bool =
     if av < bv: return false
   return false
 
+proc spawnSwapScript(): bool =
+  ## Escreve _zbxagent_swap.bat ao lado do agente e o spawna detached
+  ## (start /b via cmd). O script:
+  ##   1. dorme ~4s (deixa o agente atual continuar / NSSM se acomodar)
+  ##   2. net stop RMM-Agent  (mata o processo do agente)
+  ##   3. move agent.exe.new → agent.exe
+  ##   4. net start RMM-Agent
+  ##   5. apaga a si mesmo
+  ## NSSM não suporta pre-start hooks — esta é a forma simples e
+  ## confiável de fazer um in-place swap sem corrida com AutoRestart.
+  let bat = getAppDir() / "_zbxagent_swap.bat"
+  let content = """@echo off
+ping -n 5 127.0.0.1 >nul
+net stop RMM-Agent >nul 2>&1
+ping -n 2 127.0.0.1 >nul
+if exist "%~dp0agent.exe.new" move /Y "%~dp0agent.exe.new" "%~dp0agent.exe" >nul 2>&1
+net start RMM-Agent
+del "%~f0"
+"""
+  try:
+    writeFile(bat, content)
+  except: return false
+  try:
+    # cmd /c start "" /b — spawn detached, sem nova janela, sem espera
+    let cmd = "cmd /c start \"\" /b cmd /c \"" & bat & "\""
+    discard execCmdEx(cmd)
+    return true
+  except: return false
+
 proc checkAndApplyUpdate*(currentVersion: string): bool =
-  ## Retorna true se um update foi baixado e está pronto. Caller deve
-  ## sair (return / quit) imediatamente; NSSM reinicia o serviço e o
-  ## pre_start.bat troca agent.exe.new → agent.exe.
+  ## Retorna true APENAS se um update foi staged E o swap-batch foi
+  ## spawnado com sucesso. Caller pode sair (mas não precisa: o batch
+  ## faz net stop que kill o agente em ~4s e troca o binário).
   ##
   ## Falhas (rede, hash incorreto, etc.) retornam false e logam — o
   ## agente continua rodando normalmente com a versão atual.
@@ -131,7 +163,13 @@ proc checkAndApplyUpdate*(currentVersion: string): bool =
       return false
 
     echo "[update] ", currentVersion, " → ", remoteVersion,
-         " staged em ", newPath, ". Saindo para NSSM reiniciar."
+         " staged em ", newPath, ". Spawnando swap-batch…"
+    if not spawnSwapScript():
+      echo "[update] falha ao spawnar swap script — abortando"
+      try: removeFile(newPath)
+      except: discard
+      return false
+    echo "[update] swap-batch rodando; net stop em ~4s, restart com novo binário."
     return true
   except CatchableError as e:
     echo "[update] exceção: ", e.msg

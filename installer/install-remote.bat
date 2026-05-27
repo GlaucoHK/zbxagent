@@ -147,16 +147,9 @@ if "%LHM_OK%"=="1" (
     "%TARGET_DIR%\nssm.exe" set RMM-Agent DependOnService RMM-LHM
 )
 
-:: Auto-update hook: antes de cada start, troca agent.exe.new → agent.exe
-:: se o agente baixou uma nova versão. Veja updater.nim.
-(
-    echo @echo off
-    echo if exist "%%~dp0agent.exe.new" ^(
-    echo     move /Y "%%~dp0agent.exe.new" "%%~dp0agent.exe" ^>nul 2^>^&1
-    echo ^)
-    echo exit /b 0
-) > "%TARGET_DIR%\pre_start.bat"
-"%TARGET_DIR%\nssm.exe" set RMM-Agent AppEvents Start/Pre "%TARGET_DIR%\pre_start.bat"
+:: Nota: o swap do binário no auto-update é feito pelo próprio agente
+:: spawnando _zbxagent_swap.bat (ver updater.nim). NSSM não suporta
+:: pre-start hooks; tentativa anterior com AppEvents foi removida.
 
 net start RMM-Agent
 
