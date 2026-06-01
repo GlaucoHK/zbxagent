@@ -21,7 +21,8 @@ import lhm_client
 import cdi_client
 import updater
 
-const AGENT_VERSION* = "1.0.0"
+const AGENT_VERSION* = "1.0.2"
+
 
 # -------------------------------------------------------------------
 # CPU temp com fallback LHM → WMI
@@ -177,11 +178,13 @@ proc main() =
   if fileExists(cfgFile): cfg = loadConfigFromFile(cfgFile)
   else:                   cfg = interactiveSetup(cfgFile)
 
-  echo "Agente zbxagent v", AGENT_VERSION, ". Host: ", cfg.hostname,
+  echo "Agente zbxagent v", AGENT_VERSION,
+       ". Host: ", cfg.hostname,
        "  Zabbix: ", cfg.zabbixServer
-  let lhmProbe = getCpuTemperatureLhm()
-  if lhmProbe > 0.0:
-    echo "LHM detectado em localhost:8085 (CPU=", lhmProbe, "°C)"
+  let lhmRes = getCpuTemperatureLhmDetailed()
+  if lhmRes.celsius > 0.0:
+    echo "LHM detectado em localhost:8085 (CPU=", formatFloat(lhmRes.celsius, ffDecimal, 1),
+         "°C via \"", lhmRes.sensorName, "\")"
   else:
     echo "LHM indisponível — usando WMI para CPU temp."
 
