@@ -7,11 +7,17 @@
 ##
 ## Estratégia de escolha do sensor (1 = preferido):
 ##   1. "CPU Package"   — leitura principal Intel, alinhada com HWMonitor
-##   2. "Tctl/Tdie"     — leitura principal AMD
-##   3. "CCD #N"        — chiplets AMD individuais
-##   4. "Core #N"       — core individual; só usado se nada acima existir
+##   2. "Tdie"          — leitura principal AMD (junção, SEM offset)
+##   3. "CCD #N"        — chiplets AMD individuais (sem offset)
+##   4. "Tctl"          — Ryzen 1xxx/2xxx + alguns Threadripper têm
+##                        offset interno de +20°C (algumas TR3xxx, +27°C).
+##                        Usado só se Tdie/CCD ausentes.
+##   5. "Core #N"       — core individual; sob boost picam muito acima do
+##                        package real. Último recurso.
 ##
 ## Dentro do mesmo nível de prioridade, escolhe o MAIOR valor.
+## Para sensores combinados ("Tctl/Tdie" como string única), Tdie vence
+## porque é checado antes — produz prioridade 2.
 ## Devolve também o nome do sensor escolhido para log/diagnóstico.
 
 import httpclient, json, strutils
@@ -25,18 +31,22 @@ type CpuTempResult* = object
   priority*: int        # 1..4, ou 999 se nenhum
 
 proc sensorPriority(text: string): int =
-  ## Retorna 1..4 para sensores de CPU temp em ordem de preferência,
+  ## Retorna 1..5 para sensores de CPU temp em ordem de preferência,
   ## 999 para qualquer outra coisa.
   let t = text.toLower()
-  # 1: Intel "CPU Package" (a leitura "oficial" do pacote)
+  # 1: Intel "CPU Package" — leitura "oficial" do pacote
   if "cpu package" in t: return 1
   if "package" in t and "cpu" in t: return 1
-  # 2: AMD Tctl/Tdie — o que HWMonitor / Ryzen Master mostram
-  if "tctl" in t or "tdie" in t: return 2
-  # 3: chiplets AMD (CCD)
+  # 2: AMD Tdie — junção real, sem offset. Checado ANTES de Tctl para
+  #    que sensores combinados ("Tctl/Tdie") caiam aqui.
+  if "tdie" in t: return 2
+  # 3: chiplets AMD (CCD #N) — sem offset, leitura per-die
   if "ccd" in t: return 3
-  # 4: cores individuais (último recurso — pode picar bem acima do pacote)
-  if "cpu core" in t or ("core" in t and "#" in t): return 4
+  # 4: AMD Tctl — em Ryzen 1xxx/2xxx e alguns Threadripper tem offset
+  #    de +20°C (+27°C em alguns TR3). Só usar se Tdie/CCD ausentes.
+  if "tctl" in t: return 4
+  # 5: cores individuais — último recurso (sob boost pico bem acima do pacote)
+  if "cpu core" in t or ("core" in t and "#" in t): return 5
   return 999
 
 proc looksLikeTempReading(value: string): bool =

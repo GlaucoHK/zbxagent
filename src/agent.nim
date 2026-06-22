@@ -21,7 +21,7 @@ import lhm_client
 import cdi_client
 import updater
 
-const AGENT_VERSION* = "1.0.2"
+const AGENT_VERSION* = "1.0.3"
 
 
 # -------------------------------------------------------------------
